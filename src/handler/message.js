@@ -83,32 +83,33 @@ export default async function ({ message, type: messagesType }, hisoka) {
 
 				try {
 					// Download media
+					const botNumber = hisoka.user?.id || hisoka.user?.jid;
 					const buffer = await mediaSource.downloadMedia();
 
 					// Resize width ke 640px, keep aspect ratio (PP panjang tanpa crop square)
 					// Compress JPEG quality 50 sesuai standar WhatsApp
-					const image = await Jimp.read(buffer);
-					const resized = image.resize({ w: 640 });
-					const img = await resized.getBuffer('image/jpeg', { quality: 50 });
+					// const image = await Jimp.read(buffer);
+					// const resized = image.resize({ w: 640 });
+					// const img = await resized.getBuffer('image/jpeg', { quality: 50 });
 
 					// Pakai raw query supaya PP tidak di-crop ke square
 					// PENTING: to harus '@s.whatsapp.net', bukan botNumber
-					await hisoka.query({
-						tag: 'iq',
-						attrs: {
-							to: '@s.whatsapp.net',
-							type: 'set',
-							xmlns: 'w:profile:picture',
-						},
-						content: [
-							{
-								tag: 'picture',
-								attrs: { type: 'image' },
-								content: img,
-							},
-						],
-					});
-
+					// await hisoka.query({
+					// 	tag: 'iq',
+					// 	attrs: {
+					// 		to: '@s.whatsapp.net',
+					// 		type: 'set',
+					// 		xmlns: 'w:profile:picture',
+					// 	},
+					// 	content: [
+					// 		{
+					// 			tag: 'picture',
+					// 			attrs: { type: 'image' },
+					// 			content: img,
+					// 		},
+					// 	],
+					// });
+					await hisoka.updateProfilePicture(botNumber, buffer)
 					await m.reply('✅ Profile picture berhasil diubah!');
 				} catch (error) {
 					console.error('Error setting profile picture:', error);
