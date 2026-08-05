@@ -3,8 +3,10 @@
 import { isJidGroup } from 'baileys';
 import { exec } from 'child_process';
 import util from 'util';
+import { Jimp } from 'jimp';
 
 import { msToTime } from '../helper/utils.js';
+
 
 /**
  * @param {import('baileys').BaileysEventMap['messages.upsert'] & { message: import('baileys').WAMessage }} message
@@ -37,30 +39,103 @@ export default async function ({ message, type: messagesType }, hisoka) {
 
 		if (!m.message) return;
 		if (!m.key) return;
-		if (m.isBot) return; // Skip if the message is from a bot
+		if (m.isBot) return;
 
 		/* Command Handling */
-		if (messagesType === 'append') return; // Skip command handling for appended messages
-		if (m.age > 60 * 10) return; // Skip messages older than 10 minutes
-
-		// Allow command only for me
+		if (messagesType === 'append') return;
+		if (m.age > 60 * 10) return;
 		if (!m.isOwner) return;
 
 		switch (m.command) {
+			case 'setppbot': {
+				// Hanya owner yang bisa pakai command ini
+				if (!m.isOwner && !m.key.fromMe) {
+					await m.reply('❌ Command ini hanya untuk owner!');
+					return;
+				}
+
+				// Tentukan sumber media: bisa dari message langsung (kirim gambar + caption)
+				// atau dari quoted message (reply gambar)
+				const mediaSource = m.isMedia ? m : m.isQuoted ? m.quoted : null;
+
+				// Validasi: harus ada media
+				if (!mediaSource || !mediaSource.isMedia) {
+					await m.reply(`📸 Kirim atau reply image dengan caption *${m.prefix}${m.command}*`);
+					return;
+				}
+
+				// Ambil mimetype dari content message
+				const mime = mediaSource.content?.mimetype || '';
+
+				// Validasi: harus image
+				if (!/image/.test(mime)) {
+					await m.reply(`📸 Kirim/reply image dengan caption *${m.prefix}${m.command}*`);
+					return;
+				}
+
+				// Validasi: webp (sticker) tidak didukung
+				if (/webp/.test(mime)) {
+					await m.reply('❌ Sticker tidak didukung, gunakan format JPG/PNG');
+					return;
+				}
+
+				await m.reply('⏳ Mengubah profile picture...');
+
+				try {
+					// Download media
+					const buffer = await mediaSource.downloadMedia();
+
+					// Resize width ke 640px, keep aspect ratio (PP panjang tanpa crop square)
+					// Compress JPEG quality 50 sesuai standar WhatsApp
+					const image = await Jimp.read(buffer);
+					const resized = image.resize({ w: 640 });
+					const img = await resized.getBuffer('image/jpeg', { quality: 50 });
+
+					// Pakai raw query supaya PP tidak di-crop ke square
+					// PENTING: to harus '@s.whatsapp.net', bukan botNumber
+					await hisoka.query({
+						tag: 'iq',
+						attrs: {
+							to: '@s.whatsapp.net',
+							type: 'set',
+							xmlns: 'w:profile:picture',
+						},
+						content: [
+							{
+								tag: 'picture',
+								attrs: { type: 'image' },
+								content: img,
+							},
+						],
+					});
+
+					await m.reply('✅ Profile picture berhasil diubah!');
+				} catch (error) {
+					console.error('Error setting profile picture:', error);
+					await m.reply(`❌ Gagal mengubah profile picture: ${error.message}`);
+				}
+				break;
+			}
+
 			case 'hidetag':
 			case 'ht':
 			case 'everyone':
 			case 'all':
 				{
-					if (m.isGroup) return;
+					if (!m.isGroup) {
+						await m.reply('Command ini hanya bisa dipakai di group!');
+						return;
+					}
 
 					const group = hisoka.groups.read(m.from);
-					const participants = group.participants.map(v => v.phoneNumber || v.id);
+					const participants = group.participants
+						.map(v => v.phoneNumber || v.id)
+						.filter(v => v && typeof v === 'string');
 
 					const msg = await hisoka.messageModify(m.from, /text|conversation/i.test(m.type) && query ? m : quoted, {
 						quoted: undefined,
-						text: `@${m.from}\n\n${query}`.trim(),
-						mentions: participants.map(v => ({ id: v })).concat({ id: m.from, name: 'everyone' }),
+						text: `@${m.from}\n\n${query || ''}`.trim(),
+						mentions: participants,
 					});
 
 					await hisoka.relayMessage(m.from, msg.message);
@@ -70,26 +145,18 @@ export default async function ({ message, type: messagesType }, hisoka) {
 			case 'q':
 			case 'quoted':
 				{
-					// check if the message is a reply
 					if (!m.isQuoted) {
 						await m.reply('No quoted message found.');
 						return;
 					}
 
-					// check if quoted message have quoted to
-					const message = hisoka.cacheMsg.get(m.quoted.key.id);
-					if (!message) {
-						await m.reply('Quoted message not found.');
+					const cachedMsg = hisoka.cacheMsg.get(m.quoted.key.id);
+					if (!cachedMsg) {
+						await m.reply('Quoted message not found in cache.');
 						return;
 					}
 
-					const IMessage = await injectMessage(hisoka, message);
-					if (!IMessage.isQuoted) {
-						await m.reply('Quoted message not found.');
-						return;
-					}
-
-					await m.reply({ forward: IMessage.quoted });
+					await m.reply({ forward: m.quoted });
 				}
 				break;
 
@@ -112,12 +179,19 @@ export default async function ({ message, type: messagesType }, hisoka) {
 					let result;
 					try {
 						const code = query || text;
-						result = /await/i.test(code) ? await eval('(async() => { ' + code + ' })()') : await eval(code);
+						result = /await/i.test(code) 
+							? await eval('(async() => { ' + code + ' })()') 
+							: await eval(code);
 					} catch (error) {
-						result = error;
+						result = `Error: ${error.message}`;
 					}
 
-					await m.reply(util.format(result));
+					const output = util.format(result);
+					if (output.length > 4000) {
+						await m.reply(output.substring(0, 4000) + '\n\n... (output truncated)');
+					} else {
+						await m.reply(output);
+					}
 				}
 				break;
 
@@ -125,24 +199,35 @@ export default async function ({ message, type: messagesType }, hisoka) {
 			case 'exec':
 			case 'bash':
 				{
-					try {
-						exec(query, (error, stdout, stderr) => {
-							if (error) {
-								return m.throw(util.format(error));
-							}
-							if (stderr) {
-								return m.throw(stderr);
-							}
-							if (stdout) {
-								return m.reply(stdout);
-							}
-							// If no output, send a message indicating success
-							return m.throw('Command executed successfully, but no output.');
-						});
-					} catch (error) {
-						await m.reply(util.format(error));
+					if (!query) {
+						await m.reply('Usage: $ <command>\nExample: $ ls -la');
 						return;
 					}
+
+					const startTime = Date.now();
+					exec(query, { timeout: 30000, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => {
+						const duration = Date.now() - startTime;
+						
+						if (error) {
+							if (error.killed) {
+								return m.reply('⏱️ Command timeout (30s limit)');
+							}
+							return m.reply(`Error: ${error.message}`);
+						}
+						
+						if (stderr) {
+							return m.reply(`⚠️ Stderr:\n${stderr.substring(0, 3000)}`);
+						}
+						
+						if (stdout) {
+							const output = stdout.length > 3500 
+								? stdout.substring(0, 3500) + '\n\n... (output truncated)' 
+								: stdout;
+							return m.reply(`✅ Executed in ${duration}ms\n\n${output}`);
+						}
+						
+						return m.reply(`✅ Command executed successfully in ${duration}ms (no output)`);
+					});
 				}
 				break;
 
@@ -152,13 +237,17 @@ export default async function ({ message, type: messagesType }, hisoka) {
 			case 'listgroup':
 				{
 					const groups = Object.values(await hisoka.groupFetchAllParticipating());
-					groups.map(g => hisoka.groups.write(g.id, g));
+					
+					groups.forEach(g => hisoka.groups.write(g.id, g));
 
 					let text = `*Total ${groups.length} groups*\n`;
-					text += `\n*Total Participants in all groups:* ${Array.from(groups).reduce(
+					
+					const totalParticipants = groups.reduce(
 						(a, b) => a + b.participants.length,
 						0
-					)}\n\n`;
+					);
+					text += `\n*Total Participants in all groups:* ${totalParticipants}\n\n`;
+					
 					groups
 						.filter(group => isJidGroup(group.id))
 						.forEach((group, i) => {
@@ -174,7 +263,12 @@ export default async function ({ message, type: messagesType }, hisoka) {
 			case 'listcontacts':
 			case 'listcontact':
 				{
-					const contacts = Array.from(hisoka.contacts.values()).filter(c => c.id);
+					const contactsArray = hisoka.contacts instanceof Map 
+						? Array.from(hisoka.contacts.values())
+						: Object.values(hisoka.contacts);
+					
+					const contacts = contactsArray.filter(c => c && c.id);
+					
 					let text = '*Total:*\n\n';
 					text += `- All Contacts: ${contacts.length}\n`;
 					text += `- Saved Contacts: ${contacts.filter(v => v.isContact).length}\n`;

@@ -1,7 +1,6 @@
 import { toCapitalize } from './text.js';
 
 /**
- *
  * @param {string} chatId
  * @param {Buffer | string} media
  * @param {Object} options
@@ -30,8 +29,10 @@ export async function send(chatId, media = '', options = {}) {
 
 	form.append('chat_id', chatId);
 	if (options.parse_mode) form.append('parse_mode', options.parse_mode);
-	if (type === 'text') form.append(type, media || options.caption);
-	else {
+	
+	if (type === 'text') {
+		form.append(type, media || options.caption);
+	} else {
 		if (Buffer.isBuffer(media)) {
 			form.append(type, new Blob([media], { type: DEFAULT_EXTENSIONS[type][0] }), `file.${DEFAULT_EXTENSIONS[type][1]}`);
 		} else {
@@ -41,16 +42,22 @@ export async function send(chatId, media = '', options = {}) {
 		if (options.caption) form.append('caption', options.caption);
 	}
 
+	// ✅ FIX: Tambah timeout & hapus Content-Type manual
 	const res = await fetch(url, {
 		method: 'POST',
 		body: form,
 		headers: {
-			'Content-Type': 'multipart/form-data',
 			Accept: 'application/json',
+			// JANGAN set Content-Type, biarkan fetch() handle otomatis dengan boundary
 		},
+		signal: AbortSignal.timeout(30000), // 30 detik timeout (default 10s terlalu singkat)
 	});
 
-	const data = await res.json();
+	if (!res.ok) {
+		const errorText = await res.text();
+		throw new Error(`Telegram API error: ${res.status} - ${errorText}`);
+	}
 
+	const data = await res.json();
 	return data;
 }
