@@ -311,3 +311,12 @@ main().catch(err => {
 	// Uncomment the line below if you want to exit on error
 	// process.exit(1);
 });
+
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught Exception:', err);
+  console.error('Stack:', err.stack);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+});

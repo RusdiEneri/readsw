@@ -17,8 +17,10 @@
   "license": "MIT",
   "description": "",
   "dependencies": {
-    "baileys": "https://github.com/WhiskeySockets/Baileys/releases/download/v7.0.0-rc.6/baileys.tgz",
-    "dotenv": "^17.2.3",
+    "baileys": "https://github.com/WhiskeySockets/Baileys.git",
+    "dotenv": "^16.4.5",
+    "file-type": "^22.0.1",
+    "jimp": "^1.6.1",
     "qrcode-terminal": "^0.12.0"
   }
 }
